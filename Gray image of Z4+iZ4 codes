@@ -261,6 +261,7 @@ function ExtensiveSearch2(n)
     for k in sorted_k do
         printf "%o  |  %o  |  %o\n", n, k, BestCodes[k];
     end for;
+    return "************************";
 end function;
 
 
