@@ -1,0 +1,279 @@
+F2 := GF(2);
+Z4 := IntegerRing(4);
+P<w> := PolynomialRing(Z4);
+
+//The polynomial ring F2[z]
+
+P2<z> := PolynomialRing(F2);
+R<i> := quo< P | w^2 + 1 >;
+//S<j> := quo< P2 | z^2+1 >;
+
+//The Polynomial ring R[x]
+
+RP<x> := PolynomialRing(R);
+
+
+//Lifts coefficients from F2 to R
+function LiftCoeff(c)
+    if c eq 1 then
+        return 1;
+    else
+        return 0;
+    end if;
+end function;
+
+//This function takes f in R[x] and g,h in F2[z] such that f =gh in the residue field
+//i.e f cong gh (mod 1+i)
+//g,h must be coprime in F2[z]
+//Function gives back monic g_2, h_2 such that f =g_2h_2 in R[x] 
+//and g_2 cong g (mod 1+i), h_2 cong h (mod 1+i) and same degrees
+
+function SimpleLift(f, g, h)
+    coeffs_gR := [ LiftCoeff(c) : c in Coefficients(g) ];
+    coeffs_hR := [ LiftCoeff(c) : c in Coefficients(h) ];
+    
+    g_R := RP ! [c : c in coeffs_gR];
+    h_R := RP ! [c : c in coeffs_hR];
+    //These are just g,h but considered as in R[x]
+
+    Delta := f- g_R * h_R; //The error in R[x] of f-gh
+    d,s,t := XGCD(g,h);    // gs + ht = 1 as polynomials in F2[x] 
+    
+    s_R := RP ! [LiftCoeff(c) : c in Coefficients(s)];
+    t_R := RP ! [LiftCoeff(c) : c in Coefficients(t)];
+    //These are s,t considered in R[x]
+    
+    s_2 := s_R*Delta;
+    t_2 :=t_R*Delta;
+    //Making it so gs_2 + ht_2 = Delta + 2*something in R[x]
+    
+    s_rem := s_2 mod h_R;
+    t_rem := (Delta - s_rem * g_R) div h_R;
+    //This is the part that makes g_2, h_2 monic and not blow up in degree.
+    //It reduces their degrees as much as possible s.t. the equiality still holds mod 2
+    
+    //Final update
+    g_2 := g_R + t_rem;
+    h_2 := h_R + s_rem;
+   
+
+    return [g_2, h_2];
+end function;
+
+
+//In most cases z^n+1 doesnt factor in 2 irreducible factors in F2[z]
+//Next function just iterates SimpleLift in a "peeling" way.
+//It takes a polynomial f in R[x] and its list of (simple) factors in the reduction F2[z].
+//Note this works for our case as the f that appear will always have 1 or 0 as coeffs.
+
+
+function TotalLift(f, factors)
+    if #factors eq 2 then
+        return SimpleLift(f,factors[1],factors[2]);
+    else
+        g := factors[1];
+        
+        rest_factors := factors[2..#factors];
+        h := &* rest_factors;
+        
+        results := SimpleLift(f,g,h);
+        g_lifted := results[1];
+        rest := results[2];
+        remaining_lifts := TotalLift(rest, rest_factors);
+        return [g_lifted] cat remaining_lifts;
+
+        //This iterates on factors, lifting one by one untill all are lifted
+    end if;
+end function;
+
+
+function ConstaLift(n, lambda)
+    a := ElementToSequence(lambda)[1];
+    init_fact := TotalLift(x^n-1, [t[1]: t in Factorization(z^n+1)]);
+    
+    if lambda eq 1 then
+        return init_fact;
+
+    elif IsOdd(IntegerRing() ! a) or (n mod 4 eq 1) then
+        new_factors := [RP |];
+        for g in init_fact do
+            d := Degree(g);
+            coeffs := Coefficients(g);
+            new_coeffs := [coeffs[k+1]*lambda^(d-k) : k in [0..d] ];
+            h := RP ! new_coeffs;
+           Append(~new_factors, h);
+        end for;
+        return new_factors;
+    
+    else
+        new_factors := [RP |];
+        for g in init_fact do
+            d := Degree(g);
+            coeffs := Coefficients(g);
+            new_coeffs := [coeffs[k+1]*(-lambda)^(d-k) : k in [0..d] ];
+            h := RP ! new_coeffs;
+           Append(~new_factors, h);
+        end for;
+        return new_factors;
+    end if;
+end function;
+            
+n := 15;
+lambda := R ! (2+i);
+
+R_elements := [ a + b*i : a, b in Z4 ];
+R_units := [R! 1,R! 3,R! 1+2*i,R! 3+2*i, R! i, R! 3*i, R! 2+i, R! 2+3*i];
+
+function ConstacyclicCode(n, lambda, g)
+    modulus := x^n - lambda;
+    k := n - Degree(g);
+   
+    // Generate the basis polynomials in Px
+    polys := [ (x^i * g) mod modulus : i in [0..k-1] ];
+   
+    // Convert polynomials to rows of a matrix
+    V := RSpace(R, n);
+    gens := [ V![Coefficient(p, j) : j in [0..n-1]] : p in polys ];
+    return gens;
+end function;
+
+
+function WordGrayMap(c) //Gray map phi(c)
+    res_part1 := [Z4|];
+    res_part2 := [Z4|];
+    components := ElementToSequence(c);
+    
+    for el in components do
+        poly := P ! el;
+        a := Coefficient(poly, 0);
+        b := Coefficient(poly, 1);
+        
+        Append(~res_part1, b);     // Block 1: All 'b's
+        Append(~res_part2, a + b); // Block 2: All 'a+b's
+    end for;
+    
+    return res_part1 cat res_part2;
+end function;
+
+function WordGrayMapAlt(c) // Gray map phi'(c)
+    res := [Z4|];
+    components := ElementToSequence(c);
+    for el in components do
+        poly := P ! el;
+       
+        a := Coefficient(poly, 0); // The 'a' in a + bi
+        b := Coefficient(poly, 1); // The 'b' in a + bi
+        Append(~res, b);
+        Append(~res, a + b);
+    end for;
+    return res;
+end function;
+
+function CodeGrayMap(n, lambda, gen)
+    //Get the R-basis (length k = n - deg(g))
+    gensR := ConstacyclicCode(n, lambda, gen);
+   
+    //Map the basis {v_1, ..., v_k}
+    gensZ4_real := [WordGrayMap(c) : c in gensR];
+   
+    //Map the "imaginary" basis {i*v_1, ..., i*v_k}
+    gensZ4_imag := [WordGrayMap(i*c) : c in gensR];
+   
+    // Combine them to get the full 2k rank
+    CZ4 := LinearCode(Matrix(gensZ4_real cat gensZ4_imag));
+    return CZ4;
+end function;
+
+
+function Z4CodeParameters(n,lambda,gen)
+    dim := 2*(n-Degree(gen));
+    dL := MinimumLeeWeight(CodeGrayMap(n,lambda,gen));;
+    return [2*n,dim,dL];
+end function;
+
+function ExtensiveSearch1(n,lambda)
+    generators := [RP|];
+    parameters := [[2*n,0,0]];
+    factors := ConstaLift(n, lambda);
+    all_products := [ RP!1 ]; // Start with the empty product (identity)
+
+    // Get all non-empty subsets of indices [1..#factors]
+    for k in [1..#factors-1] do
+        subs := Subsets({1..#factors}, k);
+        for s in subs do
+            // Multiply the factors corresponding to the indices in the subset s
+            prod := &*[ factors[i] : i in s ];
+            Append(~all_products, prod);
+        end for;
+    end for;
+   
+    for divisor in all_products do
+        Append(~parameters,Z4CodeParameters(n,lambda,divisor));
+        Append(~generators, divisor);
+    end for;
+    return parameters, generators;
+end function;
+
+
+
+function ExtensiveSearch2(n)
+    AllResults := [[]|];
+    for unit in R_units do
+        params, genlist := ExtensiveSearch1(n, unit);
+        print(unit);
+        for index1 in [1..#params] do
+            print index1, params[index1];
+        end for;
+        if unit eq 1 or unit eq i then
+            for index2 in [1..#genlist] do
+                print index2+1,":   ", genlist[index2];
+            end for;
+        end if;
+        print("-----------");
+
+        AllResults := AllResults cat params;
+    end for;
+    BestCodes := AssociativeArray();
+
+    for res in AllResults do
+        n := res[1];
+        k := res[2];
+        d := res[3];
+   
+        if not IsDefined(BestCodes, k) then
+            // First time we see this k, just store the d
+            BestCodes[k] := d;
+        else
+            // Update if the new d is better (higher)
+            if d gt BestCodes[k] then
+                BestCodes[k] := d;
+            end if;
+        end if;
+    end for;
+   
+    //Sort the keys (k values) so the output is clean
+    keys := Keys(BestCodes);
+    sorted_k := Sort(SetToSequence(keys));
+
+    print "--- Best Parameters Found ---";
+    print "n  |  k  |  max(d_L)";
+    print "-------------------------";
+    for k in sorted_k do
+        printf "%o  |  %o  |  %o\n", n, k, BestCodes[k];
+    end for;
+end function;
+
+
+
+n := 15;
+
+lambda := R ! i;
+
+ConstaLift(n, lambda);
+
+gen := RP! x^4 + 2*x^2 + 3*i*x + 1;
+
+C := CodeGrayMap(n, lambda, gen);
+print C;
+MinimumWeight(C);
+ExtensiveSearch2(n);
